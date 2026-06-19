@@ -60,12 +60,14 @@ class Node:
     line feature such as a road
     """
 
-    def __init__(self, id: int, x: float, y: float, height: Optional[float] = None):
+    def __init__(self, id: int, x: float, y: float, height: Optional[float] = None, velocity: Optional[float] = None):
         """
         Args:
             id: representing unique node ID
             x: x-coordinate in city reference system
             y: y-coordinate in city reference system
+            height: optionally, z-coordinate in city reference system
+            velocity: optionally, pointwise velocity attribute
 
         Returns:
             None
@@ -74,6 +76,7 @@ class Node:
         self.x = x
         self.y = y
         self.height = height
+        self.velocity = velocity
 
 
 def str_to_bool(s: str) -> bool:
@@ -109,6 +112,10 @@ def convert_dictionary_to_lane_segment_obj(lane_id: int, lane_dictionary: Mappin
     rnid = lane_dictionary["r_neighbor_id"]
     l_neighbor_id = None if lnid == "None" else int(lnid)
     r_neighbor_id = None if rnid == "None" else int(rnid)
+    
+    # Check if we parsed velocity to pass to LaneSegment
+    has_velocity = lane_dictionary.get("has_velocity", False)
+    
     ls = LaneSegment(
         lane_id,
         has_traffic_control,
@@ -119,6 +126,7 @@ def convert_dictionary_to_lane_segment_obj(lane_id: int, lane_dictionary: Mappin
         predecessors,
         successors,
         lane_dictionary["centerline"],
+        has_velocity=has_velocity
     )
     return ls
 
@@ -189,36 +197,45 @@ def get_lane_identifier(child: ET.Element) -> int:
     return int(child.attrib["lane_id"])
 
 
-def convert_node_id_list_to_xy(node_id_list: List[int], all_graph_nodes: Mapping[int, Node]) -> np.ndarray:
+def convert_node_id_list_to_xy(node_id_list: List[int], all_graph_nodes: Mapping[int, Node]) -> Tuple[np.ndarray, bool]:
     """
-    convert node id list to centerline xy coordinate
+    convert node id list to centerline xy coordinate (and optional height / velocity)
 
     Args:
        node_id_list: list of node_id's
        all_graph_nodes: dictionary mapping node_ids to Node
 
     Returns:
-       centerline
+       centerline: numpy array of shape (N, 2), (N, 3) or (N, 4)
+       has_velocity: boolean indicating if velocity is present
     """
     num_nodes = len(node_id_list)
+    
+    first_node = all_graph_nodes[node_id_list[0]]
+    has_height = first_node.height is not None
+    has_velocity = first_node.velocity is not None
+    
+    # Calculate the required dimensions to stack arrays cleanly
+    dims = 2
+    if has_height:
+        dims += 1
+    if has_velocity:
+        dims += 1
 
-    if all_graph_nodes[node_id_list[0]].height is not None:
-        centerline = np.zeros((num_nodes, 3))
-    else:
-        centerline = np.zeros((num_nodes, 2))
+    centerline = np.zeros((num_nodes, dims))
+    
     for i, node_id in enumerate(node_id_list):
-        if all_graph_nodes[node_id].height is not None:
-            centerline[i] = np.array(
-                [
-                    all_graph_nodes[node_id].x,
-                    all_graph_nodes[node_id].y,
-                    all_graph_nodes[node_id].height,
-                ]
-            )
-        else:
-            centerline[i] = np.array([all_graph_nodes[node_id].x, all_graph_nodes[node_id].y])
+        node = all_graph_nodes[node_id]
+        row_data = [node.x, node.y]
+        
+        if has_height:
+            row_data.append(node.height if node.height is not None else 0.0)
+        if has_velocity:
+            row_data.append(node.velocity if node.velocity is not None else 0.0)
+            
+        centerline[i] = np.array(row_data)
 
-    return centerline
+    return centerline, has_velocity
 
 
 def extract_node_from_ET_element(child: ET.Element) -> Node:
@@ -236,14 +253,17 @@ def extract_node_from_ET_element(child: ET.Element) -> Node:
     """
     node_fields = child.attrib
     node_id = int(node_fields["id"])
-    if "height" in node_fields.keys():
-        return Node(
-            id=node_id,
-            x=float(node_fields["x"]),
-            y=float(node_fields["y"]),
-            height=float(node_fields["height"]),
-        )
-    return Node(id=node_id, x=float(node_fields["x"]), y=float(node_fields["y"]))
+    
+    height = float(node_fields["height"]) if "height" in node_fields.keys() else None
+    velocity = float(node_fields["v"]) if "v" in node_fields.keys() else None
+    
+    return Node(
+        id=node_id, 
+        x=float(node_fields["x"]), 
+        y=float(node_fields["y"]),
+        height=height,
+        velocity=velocity
+    )
 
 
 def extract_lane_segment_from_ET_element(
@@ -292,7 +312,8 @@ def extract_lane_segment_from_ET_element(
         else:
             node_id_list.append(extract_node_waypt(way_field))
 
-    lane_obj["centerline"] = convert_node_id_list_to_xy(node_id_list, all_graph_nodes)
+    # Centerline logic updated to receive the data map + boolean flag
+    lane_obj["centerline"], lane_obj["has_velocity"] = convert_node_id_list_to_xy(node_id_list, all_graph_nodes)
     lane_segment = convert_dictionary_to_lane_segment_obj(lane_id, lane_obj)
     return lane_segment, lane_id
 

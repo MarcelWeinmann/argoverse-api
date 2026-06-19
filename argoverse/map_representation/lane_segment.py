@@ -16,6 +16,7 @@ class LaneSegment:
         predecessors: List[int],
         successors: Optional[List[int]],
         centerline: np.ndarray,
+        has_velocity: bool = False,  # Add this parameter here
     ) -> None:
         """Initialize the lane segment.
 
@@ -39,3 +40,4 @@ class LaneSegment:
         self.predecessors = predecessors
         self.successors = successors
         self.centerline = centerline
+        self.has_velocity = has_velocity # Store it as an instance attribute

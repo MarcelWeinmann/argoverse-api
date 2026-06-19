@@ -701,22 +701,43 @@ class ArgoverseMap:
         adjacent_ids = [r_neighbor, l_neighbor]
         return adjacent_ids
 
-    def get_lane_segment_centerline(self, lane_segment_id: int, city_name: str) -> np.ndarray:
+    def get_lane_segment_centerline(
+        self, lane_segment_id: int, city_name: str, return_velocity: bool = False
+    ) -> np.ndarray:
         """
         We return a 3D centerline for any particular lane segment.
 
         Args:
             lane_segment_id: unique identifier for a lane segment within a city
             city_name: either 'MIA' or 'PIT' for Miami or Pittsburgh
+            return_velocity: If True, appends the pointwise velocity as the final dimension
 
         Returns:
-            lane_centerline: Numpy array of shape (N,3)
+            lane_centerline: Numpy array of shape (N,3) or (N,4)
         """
-        lane_centerline = self.city_lane_centerlines_dict[city_name][lane_segment_id].centerline
-        if len(lane_centerline[0]) == 2:
-            lane_centerline = self.append_height_to_2d_city_pt_cloud(lane_centerline, city_name)
+        lane_segment = self.city_lane_centerlines_dict[city_name][lane_segment_id]
+        raw_centerline = lane_segment.centerline
+        
+        # Check for our custom velocity flag
+        has_velocity = getattr(lane_segment, "has_velocity", False)
+        
+        if has_velocity:
+            spatial_centerline = raw_centerline[:, :-1]
+            velocity_col = raw_centerline[:, -1:]
+        else:
+            spatial_centerline = raw_centerline
+            # Default to an array of 0.0s matching the number of waypoints
+            velocity_col = np.zeros((spatial_centerline.shape[0], 1))
 
-        return lane_centerline
+        # Add height if the spatial centerline is strictly 2D
+        if spatial_centerline.shape[1] == 2:
+            spatial_centerline = self.append_height_to_2d_city_pt_cloud(spatial_centerline, city_name)
+
+        # Append velocity back if the user requested it
+        if return_velocity:
+            return np.hstack([spatial_centerline, velocity_col])
+
+        return spatial_centerline
 
     def get_lane_segment_polygon(self, lane_segment_id: int, city_name: str) -> np.ndarray:
         """
@@ -1102,6 +1123,7 @@ class ArgoverseMap:
         query_y: float,
         city_name: str,
         query_search_range_manhattan: float = 80.0,
+        return_velocity: bool = False,
     ) -> np.ndarray:
         """
         Find local lane centerline to the specified x,y location
@@ -1110,10 +1132,14 @@ class ArgoverseMap:
             query_x: x-coordinate of map query
             query_y: x-coordinate of map query
             city_name: either 'MIA' for Miami or 'PIT' for Pittsburgh
+            query_search_range_manhattan: search threshold
+            return_velocity: If True, include velocity in the returned arrays
 
         Returns
             local_lane_centerlines: Array of arrays, representing an array of lane centerlines, each a polyline
         """
         lane_ids = self.get_lane_ids_in_xy_bbox(query_x, query_y, city_name, query_search_range_manhattan)
-        local_lane_centerlines = [self.get_lane_segment_centerline(lane_id, city_name) for lane_id in lane_ids]
-        return np.array(local_lane_centerlines)
+        local_lane_centerlines = [self.get_lane_segment_centerline(lane_id, city_name, return_velocity) for lane_id in lane_ids]
+        
+        # Specify dtype=object to handle jagged arrays
+        return np.array(local_lane_centerlines, dtype=object)
