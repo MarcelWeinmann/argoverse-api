@@ -40,10 +40,6 @@ ROI_ISOCONTOUR = 5.0
 # argoverse-api/map_files
 ROOT = Path(__file__).resolve().parent.parent.parent / "map_files"
 
-# known City IDs from newest to oldest
-MIAMI_ID = 10316
-PITTSBURGH_ID = 10314
-
 # Any numeric type
 Number = Union[int, float]
 _PathLike = Union[str, "os.PathLike[str]"]
@@ -59,7 +55,7 @@ class ArgoverseMap:
         """Initialize the Argoverse Map."""
         self.root = root
 
-        self.city_name_to_city_id_dict = {"PIT": PITTSBURGH_ID, "MIA": MIAMI_ID}
+        self.city_name_to_city_id_dict = {"ABU": 10317}
         self.render_window_radius = 150
         self.im_scale_factor = 50
 
